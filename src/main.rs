@@ -5,6 +5,8 @@ extern crate panic_abort;
 
 use arrayvec::ArrayVec;
 
+use embedded_hal::digital::v2::OutputPin;
+
 use onewire::{
     OneWire,
     DeviceSearch,

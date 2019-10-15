@@ -9,12 +9,8 @@ version = "0.1.0"
 cortex-m = "*"
 cortex-m-rt = "*"
 panic-abort = "*"
-onewire = "*"
-
-[dependencies.bit-vec]
-version = "*"
-default-features = false
-features = []
+onewire = {git = "https://github.com/chernomor/onewire"}
+embedded-hal = "*"
 
 [dependencies.stm32f1xx-hal]
 version = "*"
@@ -35,4 +31,3 @@ bench = false
 codegen-units = 1 # better optimizations
 debug = true # symbols are nice and they don't increase the size on Flash
 lto = true # better optimization
-opt-level = 2
