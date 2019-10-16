@@ -6,14 +6,19 @@ name = "dollhouse"
 version = "0.1.0"
 
 [dependencies]
-cortex-m = "*"
-cortex-m-rt = "*"
-panic-abort = "*"
-onewire = {git = "https://github.com/chernomor/onewire"}
-embedded-hal = "*"
+cortex-m = "0.6.1"
+cortex-m-rt = "0.6.10"
+panic-abort = "0.3.2"
+onewire = "0.3.11"
+ssd1306 = "0.3.0-alpha.2"
+embedded-hal = "0.2.3"
+embedded-graphics = "0.6.0-alpha.2"
+panic-semihosting = {version = "0.5.3", optional = true}
+cortex-m-semihosting = {version = "0.3.5", optional = true}
+pid = "1.3.0"
 
 [dependencies.stm32f1xx-hal]
-version = "*"
+version = "0.4.0"
 features = ["stm32f103", "rt"]
 
 [dependencies.arrayvec]
@@ -31,3 +36,6 @@ bench = false
 codegen-units = 1 # better optimizations
 debug = true # symbols are nice and they don't increase the size on Flash
 lto = true # better optimization
+
+[features]
+semihosting = ["cortex-m-semihosting", "panic-semihosting"]
