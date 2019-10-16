@@ -33,9 +33,7 @@ use cortex_m_rt::entry;
 use cortex_m_semihosting::hio;
 use core::fmt::Write;
 
-
 use pid::Pid;
-
 
 use embedded_graphics::{fonts::Font6x8,
                         pixelcolor::BinaryColor,
@@ -60,6 +58,8 @@ impl Pins<TIM3> for MyChannels
 
 const N_SEN : usize = 2;
 const TARGET : f32 = 40.0;
+const N_HIS : usize = 256; // roughly 4 mins
+const N_OVH : usize = 200; // 200/256 = 80%. If we have been averagely heating at 80%, we are wrong
 
 const KP : f32 = 0.0;
 const KI : f32 = 0.0;
@@ -173,6 +173,9 @@ macro_rules! print {
     // PID
     let mut pid = Pid::new(KP, KI, KD, LP, LI, LD);
     pid.update_setpoint(TARGET);
+    let mut his : [u16; N_HIS] = [0; N_HIS];
+    let mut sum_his = 0;
+    let mut j = 0;
 
     // watchdog
     let iwdg = dp.IWDG;
@@ -205,9 +208,25 @@ macro_rules! print {
         }
         pwm.set_duty(duty);
 
+        // overheat protection
+        sum_his -= his[j];
+        his[j] = duty;
+        sum_his += his[j];
+
+        j += 1;
+        if j == N_HIS {
+            j = 0;
+        }
+
+        if sum_his > max_duty * N_OVH as u16 {
+            panic!("overheat protection");
+        }
+
+        //draw something
         disp.draw(Font6x8::render_str("holy shit").stroke(Some(BinaryColor::On)).into_iter());
         disp.flush().unwrap();
 
+        //feed the dog so it doesn't bit                
         wd.feed();
     }
 }
