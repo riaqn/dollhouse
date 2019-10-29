@@ -9,10 +9,13 @@ use arrayvec::{ArrayVec};
 use onewire::{
     OneWire,
     DeviceSearch,
-    ds18b20,
+    ds18b20::{
+        MeasureResolution,
+        DS18B20,
+        split_temp
+    },
 };
 
-use self::ds18b20::{DS18B20, split_temp};
 
 use stm32f1xx_hal::{
     prelude::*,
@@ -50,6 +53,7 @@ const N_SEN : usize = 2;
 const TARGET : f32 = 40.0;
 const N_HIS : usize = 80;
 const N_OVH : usize = 40;
+const N_TRY : u32 = 2; // at most try getting temperature twice
 
 const KP : f32 = 0.2;
 const KI : f32 = 0.01;
@@ -125,6 +129,13 @@ fn main() -> ! {
 
     let mut delay = delay::Delay::new(cp.SYST, clocks);
 
+    // watchdog
+    let iwdg = dp.IWDG;
+    let mut wd = IndependentWatchdog::new(iwdg);
+    wd.start(2000.ms());
+    unsafe{WD = Some (wd)}
+    print!("watchdog init.\n");
+
     // DISPLAY
     let b6 = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
     let b7 = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
@@ -152,6 +163,7 @@ fn main() -> ! {
     print!("display init.\n");
 
     //HIO
+    #[cfg(feature = "semihosting")]
     match hio::hstdout() {
         Ok(hio) => {unsafe {HIO = Some(hio)}; print!("HIO init.\n")},
         Err(_) => {print!("HIO init failed \n")}
@@ -173,6 +185,7 @@ fn main() -> ! {
     pwm.set_duty(0);
     pwm.enable();
     let max_duty : u16 = pwm.get_max_duty();
+    let max_duty_f = max_duty as f32;
     unsafe {PWM = Some (pwm)};
 
     print!("PWM init.\n");
@@ -205,6 +218,7 @@ fn main() -> ! {
     let mut sum_loads : u32 = 0;
     let mut sum_temps : i32 = 0;
     let mut j = 0;
+    let mut tr = 0;
 
     // PID
     let mut integral = 0.0;
@@ -215,34 +229,48 @@ fn main() -> ! {
     dwt.enable_cycle_counter();
     let freq = clocks.sysclk().0 as f32;
 
-    // watchdog
-    let iwdg = dp.IWDG;
-    let mut wd = IndependentWatchdog::new(iwdg);
-    wd.start(2000.ms());
-    unsafe{WD = Some (wd)}
-    print!("watchdog init.\n");
-
     // loops
     loop {
+        //feed the dog so it doesn't bit            
+        unsafe  {    
+        match &mut WD {
+            Some (wd) => {wd.feed()},
+            None => {panic!("where did the dog go?")}
+        }
+        }
+        tr += 1;
+        if tr > N_TRY {panic!("max try reached")}
+
         let time = DWT::get_cycle_count();
         let mut temp = i32::MIN;
         let multiplier = 10000;
+        let multiplier_f = multiplier as f32;
+        let mut err = false; 
         for i in 0..sen.len() {
                 // request sensor to measure temperature
-                let resolution = sen[i].measure_temperature(&mut wire, &mut delay).unwrap();
-                
-                // wait for compeltion, depends on resolution 
-                delay.delay_ms(resolution.time_ms());
-                
-                // read temperature
-                let temperature = sen[i].read_temperature(&mut wire, &mut delay).unwrap();
-
-                let (d, f) = split_temp(temperature);
-                let t = d as i32 * multiplier + f as i32;
-                if t > temp {
-                    temp = t;
+                match sen[i].measure_temperature(&mut wire, &mut delay) {
+                    Ok (_) => {},
+                    Err (_) => {err = true;break}
                 }
         }
+        if err {continue};
+
+        // wait for compeltion, depends on resolution 
+        delay.delay_ms(MeasureResolution::TC.time_ms());
+                           
+        for i in 0..sen.len() {
+                // read temperature
+                match sen[i].read_temperature(&mut wire, &mut delay) {
+                    Ok (temperature) => {   let (d, f) = split_temp(temperature);
+                                            let t = d as i32 * multiplier + f as i32;
+                                            if t > temp { temp = t;}
+                                        },
+                    Err (_) => {err = true; break}
+                }
+        }
+        if err {continue};
+
+        tr = 0;
 
         let error = TARGET - temp as f32 / multiplier as f32;
         let p = KP * error;
@@ -285,7 +313,6 @@ fn main() -> ! {
             }
         }
 
-        print!("TEMP = {}, p = {}, i = {}, d = {}, duty = {}/{}\n", temp, p, i, d, duty, max_duty);
 
         // overheat protection
         sum_loads -= loads[j] as u32;
@@ -324,12 +351,10 @@ fn main() -> ! {
             }
         }
 
-        //feed the dog so it doesn't bit            
-        unsafe  {    
-        match &mut WD {
-            Some (wd) => {wd.feed()},
-            None => {panic!("where did the dog go?")}
-        }
-        }
+        print!("TEMP {:.3} p {:.2} i {:.2} d {:.2} sum {:.2}\n", temp, p, i, d, output);
+        print!("TEMP {:.3}/{:.3}/{:.3}\n", min_temp as f32 / multiplier_f, sum_temps as f32 / N_HIS as f32 / multiplier_f, max_temp as f32 / multiplier_f);
+        print!("LOAD {:.2}/{:.2}/{:.2}\n", min_load as f32 / max_duty_f, sum_loads as f32 / N_HIS as f32 / max_duty_f, max_load as f32 / max_duty_f);
+
+ 
     }
 }
